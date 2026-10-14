@@ -488,6 +488,7 @@ function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h);
   camera.aspect = w / h;
+  camera.fov = w / h < 0.8 ? 58 : 36; // portrait phones need a wider lens to frame the presets
   if (w > 760) camera.setViewOffset(w, h, -PANEL_SHIFT, 0, w, h);
   else camera.clearViewOffset();
   camera.updateProjectionMatrix();
