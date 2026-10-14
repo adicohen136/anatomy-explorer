@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anatomy Explorer</title>
+  <meta name="description" content="A 3D human body you can rotate, zoom and peel layer by layer: skin, muscles, skeleton, organs, blood vessels and nerves.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <aside id="panel" class="open">
+    <button id="panel-toggle" aria-label="Toggle controls">
+      <span class="bar"></span>
+    </button>
+    <header class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><circle cx="16" cy="7" r="4.2"/><path d="M9 14c0-2 2-3.4 7-3.4s7 1.4 7 3.4v6.5c0 1-.8 1.6-1.7 1.6h-.8V29a1.5 1.5 0 0 1-3 0v-6.8h-3V29a1.5 1.5 0 0 1-3 0v-6.9h-.8c-.9 0-1.7-.6-1.7-1.6Z"/></svg>
+      </div>
+      <div>
+        <h1>Anatomy Explorer</h1>
+        <p class="tag">Zoom in and peel the human body, layer by layer</p>
+      </div>
+    </header>
+
+    <section>
+      <div class="row-title">
+        <span>Peel depth</span>
+        <span id="depth-name" class="pill">Skin</span>
+      </div>
+      <input type="range" id="peel" min="0" max="5" step="0.01" value="0" aria-label="Peel depth">
+      <div id="depth-ticks" class="ticks"></div>
+    </section>
+
+    <section>
+      <div class="row-title"><span>Layers</span><button id="reset-layers" class="link">reset</button></div>
+      <ul id="layer-list"></ul>
+    </section>
+
+    <section class="toggles">
+      <label class="switch"><input type="checkbox" id="auto-peel" checked><span></span>Peel as I zoom in</label>
+      <label class="switch"><input type="checkbox" id="xray"><span></span>X-ray glow</label>
+      <label class="switch"><input type="checkbox" id="animate" checked><span></span>Heartbeat &amp; breathing</label>
+      <label class="switch"><input type="checkbox" id="spin" checked><span></span>Slow turntable</label>
+    </section>
+
+    <section>
+      <div class="row-title"><span>Cross-section</span></div>
+      <div class="seg" id="cut-mode">
+        <button data-cut="off" class="on">Off</button>
+        <button data-cut="front">Front → back</button>
+        <button data-cut="side">Side → side</button>
+      </div>
+      <input type="range" id="cut" min="0" max="1" step="0.001" value="0.45" aria-label="Cross-section position" disabled>
+    </section>
+
+    <section>
+      <div class="row-title"><span>Jump to</span></div>
+      <div class="presets">
+        <button data-view="full">Full body</button>
+        <button data-view="head">Head</button>
+        <button data-view="chest">Chest</button>
+        <button data-view="abdomen">Abdomen</button>
+        <button data-view="arm">Hand</button>
+        <button data-view="legs">Knee</button>
+      </div>
+    </section>
+  </aside>
+
+  <div id="depth-meter" aria-hidden="true">
+    <div class="track"><div id="depth-fill"></div><div id="depth-dot"></div></div>
+    <ol id="depth-labels"></ol>
+  </div>
+
+  <div id="vitals"><span class="heart">♥</span> <b id="bpm">72</b> bpm</div>
+
+  <article id="info" hidden>
+    <button id="info-close" aria-label="Close">×</button>
+    <div id="info-layer" class="chip"></div>
+    <h2 id="info-name"></h2>
+    <p id="info-desc"></p>
+    <div class="fact"><span>Did you know?</span><p id="info-fact"></p></div>
+    <div class="info-actions">
+      <button id="info-focus">Zoom to it</button>
+      <button id="info-solo">Show only its layer</button>
+    </div>
+  </article>
+
+  <div id="tooltip"></div>
+  <div id="hint">Drag to rotate · Scroll or pinch to zoom · Right-drag to pan · Click any part</div>
+  <div id="loading"><div class="spinner"></div>Growing a human…</div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
