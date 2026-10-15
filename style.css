@@ -148,6 +148,8 @@ input[type=range]:disabled { opacity: 0.35; }
 }
 .seg button:hover, .presets button:hover, .info-actions button:hover { background: rgba(255,255,255,0.09); }
 .seg button.on { background: rgba(90, 209, 230, 0.18); border-color: var(--accent); }
+.help { margin: 0; font-size: 12.5px; line-height: 1.7; color: var(--muted); }
+.help b { color: var(--text); font-weight: 500; }
 .presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 
 /* ---------------------------------------------------------------- HUD */

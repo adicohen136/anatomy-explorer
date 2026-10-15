@@ -443,11 +443,11 @@ function buildSkeleton(L, ribCurves) {
     if (cartilage) L.tube('costal-cartilage', cartilage, 0.005, { radial: 8 });
   }
   const st = L.mesh('sternum', new THREE.BoxGeometry(0.028, 0.19, 0.01));
-  st.position.set(0, 1.32, 0.085);
+  st.position.set(0, 1.32, 0.077);
   const man = L.mesh('sternum', new THREE.BoxGeometry(0.045, 0.04, 0.011));
-  man.position.set(0, 1.405, 0.083);
+  man.position.set(0, 1.405, 0.075);
   const xi = L.mesh('sternum', new THREE.ConeGeometry(0.01, 0.025, 8));
-  xi.position.set(0, 1.213, 0.084);
+  xi.position.set(0, 1.213, 0.076);
   xi.rotation.x = Math.PI;
 
   for (const s of SIDES) {
@@ -510,7 +510,7 @@ function makeRibCurves() {
         const front = v(0.5 * f * s, y0 - drop - 0.005, 0.072);
         bone = [...back, v(0.82 * f * s, y0 - drop * 0.9, 0.05), front];
         const sy = i < 7 ? 1.41 - i * 0.025 : 1.245;
-        cartilage = [front, v(0.03 * s, (front.y + sy) / 2, 0.082), v(0.014 * s, sy, 0.085)];
+        cartilage = [front, v(0.03 * s, (front.y + sy) / 2, 0.076), v(0.014 * s, sy, 0.077)];
       } else {
         bone = [...back, v(0.9 * f * s, y0 - drop, 0.03)];
       }
