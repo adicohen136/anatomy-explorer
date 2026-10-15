@@ -6,6 +6,11 @@ import { buildBody, INFO } from './anatomy.js';
 const $ = (id) => document.getElementById(id);
 const clamp = THREE.MathUtils.clamp;
 const V3 = (a) => new THREE.Vector3(...a);
+// Zooming in peels outer layers: none at `far`, and the first `layers` layers are gone `span` closer.
+const ZOOM_PEEL = { far: 2.4, span: 1.8, layers: 3 };
+const zoomPeelAt = (dist) => clamp((ZOOM_PEEL.far - dist) / ZOOM_PEEL.span, 0, 1) * ZOOM_PEEL.layers;
+// Closest camera distance at which layer i is still fully shown.
+const keepLayerDist = (i) => ZOOM_PEEL.far - (ZOOM_PEEL.span * i) / ZOOM_PEEL.layers + 0.05;
 const WHITE = new THREE.Color('#ffffff');
 const SHORT = ['Skin', 'Muscle', 'Bone', 'Organs', 'Vessels', 'Nerves'];
 const XRAY = [0.22, 0.3, 0.55, 0.7, 0.95, 0.95];
@@ -44,18 +49,24 @@ const VIEWS = {
   arm: { target: [0.27, 0.86, 0.02], pos: [0.95, 1.0, 0.85] },
   legs: { target: [0.1, 0.5, 0], pos: [0.7, 0.66, 0.85] },
 };
-camera.position.copy(V3(VIEWS.full.pos)).add(new THREE.Vector3(1.2, 0.2, 0.6));
+camera.position.copy(V3(VIEWS.full.pos)).add(new THREE.Vector3(0.9, 0.1, 0));
 
 const controls = new OrbitControls(camera, canvas);
 controls.target.copy(V3(VIEWS.full.target));
 controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.zoomSpeed = 4.5; // ~20% closer per scroll notch (default is ~5%)
-controls.minDistance = 0.16;
-controls.maxDistance = 6;
-controls.zoomToCursor = true;
-controls.autoRotate = true;
+controls.dampingFactor = 0.1;
+controls.zoomSpeed = 2.5; // ~12% closer per scroll notch (default is ~5%)
+controls.rotateSpeed = 0.8;
+controls.minDistance = 0.18;
+controls.maxDistance = 5;
+// Zoom straight toward the pivot, and never orbit below the floor.
+controls.zoomToCursor = false;
+controls.minPolarAngle = 0.1;
+controls.maxPolarAngle = Math.PI / 2 - 0.05;
 controls.autoRotateSpeed = 0.6;
+// The pivot may only move inside the body's bounding box, so panning can't lose the body.
+const PIVOT_BOUNDS = new THREE.Box3(new THREE.Vector3(-0.35, 0.05, -0.2), new THREE.Vector3(0.35, 1.75, 0.2));
+const pivotShift = new THREE.Vector3();
 
 // Floor glow
 function glowTexture() {
@@ -136,7 +147,7 @@ scene.add(cutVisual);
 
 // ---------------------------------------------------------------- state & UI
 
-const state = { peel: 0, eff: 0, autoPeel: true, xray: false, animate: true, spin: true, cut: 'off' };
+const state = { peel: 0, eff: 0, autoPeel: true, xray: false, animate: true, spin: false, cut: 'off' };
 const ui = {
   peel: $('peel'), depthName: $('depth-name'), ticks: $('depth-ticks'), list: $('layer-list'),
   fill: $('depth-fill'), dot: $('depth-dot'), labels: $('depth-labels'), cut: $('cut'),
@@ -251,7 +262,7 @@ let tween = null;
 let lastInteract = 0;
 const ease = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
 
-function tweenTo(pos, target, dur = 1200) {
+function tweenTo(pos, target, dur = 800) {
   tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos, t1: target, start: performance.now(), dur };
   lastInteract = performance.now();
 }
@@ -291,7 +302,8 @@ function glow(part, level) {
     if (level) {
       m.color.lerp(WHITE, level === 2 ? 0.22 : 0.32);
       m.emissive.set(level === 2 ? '#1d9fc0' : '#3a78e0');
-      m.emissiveIntensity = level === 2 ? 0.5 : 0.42;
+      // Vertex-coloured skin has a white base colour, so only the emissive tint shows; make it stronger.
+      m.emissiveIntensity = (level === 2 ? 0.5 : 0.42) * (m.vertexColors ? 1.6 : 1);
     }
   }
 }
@@ -337,15 +349,19 @@ function select(hit) {
   ui.info.hidden = false;
 }
 
+// Move the pivot to a hit point, staying far enough that zoom-peeling doesn't strip
+// away the layer that was hit.
+function flyTo(hit, dist, dur) {
+  if (state.autoPeel && hit.layer.index < ZOOM_PEEL.layers) dist = Math.max(dist, keepLayerDist(hit.layer.index));
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  tweenTo(hit.point.clone().addScaledVector(dir, dist), hit.point.clone(), dur);
+}
+
 function focusOn(hit) {
   const box = new THREE.Box3();
   for (const m of partMeshes.get(hit.part)) box.expandByObject(m);
   const size = box.getSize(new THREE.Vector3()).length();
-  let dist = clamp(Math.min(size, 0.5) * 2.2, 0.32, 1.6);
-  // Stay far enough that zoom-peeling doesn't strip away the layer we're looking at.
-  if (state.autoPeel && hit.layer.index < 3) dist = Math.max(dist, 2.45 - 0.6 * hit.layer.index);
-  const dir = camera.position.clone().sub(controls.target).normalize();
-  tweenTo(hit.point.clone().addScaledVector(dir, dist), hit.point.clone());
+  flyTo(hit, clamp(Math.min(size, 0.5) * 2.2, 0.32, 1.6));
 }
 
 $('info-close').addEventListener('click', () => select(null));
@@ -377,8 +393,14 @@ canvas.addEventListener('pointerleave', () => {
   pointer = null;
   setHover(null);
 });
+// Double-click a spot to make it the centre of rotation and move in toward it.
+canvas.addEventListener('dblclick', (e) => {
+  const hit = pick(e.clientX, e.clientY);
+  if (hit) flyTo(hit, Math.min(camera.position.distanceTo(controls.target), 1.1), 600);
+});
 addEventListener('keydown', (e) => {
   if (e.key === 'Escape') select(null);
+  if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey) tweenTo(V3(VIEWS.full.pos), V3(VIEWS.full.target));
 });
 
 // ---------------------------------------------------------------- per-frame updates
@@ -435,8 +457,14 @@ function frame() {
     controls.target.lerpVectors(tween.t0, tween.t1, e);
     if (k === 1) tween = null;
   }
-  controls.autoRotate = state.spin && !tween && now - lastInteract > 7000;
+  controls.autoRotate = state.spin && !tween && now - lastInteract > 4000;
   controls.update();
+  // Keep the pivot inside the body; move the camera with it so the view doesn't twist.
+  PIVOT_BOUNDS.clampPoint(controls.target, pivotShift).sub(controls.target);
+  if (pivotShift.lengthSq() > 0) {
+    camera.position.add(pivotShift);
+    controls.target.add(pivotShift);
+  }
 
   if (peelAnim) {
     const k = Math.min(1, (now - peelAnim.start) / 700);
@@ -447,7 +475,7 @@ function frame() {
 
   // Zooming in peels outer layers: far = everything, close = down to the organs.
   const dist = camera.position.distanceTo(controls.target);
-  const zoomPeel = state.autoPeel ? clamp((2.4 - dist) / 1.8, 0, 1) * 3 : 0;
+  const zoomPeel = state.autoPeel ? zoomPeelAt(dist) : 0;
   const target = Math.max(state.peel, zoomPeel);
   state.eff += (target - state.eff) * Math.min(1, dt * 10);
   if (Math.abs(target - state.eff) < 0.001) state.eff = target;
@@ -501,8 +529,24 @@ if (VIEWS[q.get('view')]) {
   controls.target.copy(V3(VIEWS[q.get('view')].target));
   lastInteract = performance.now();
 }
+const vec3Param = (name) => {
+  const a = (q.get(name) ?? '').split(',').map(Number);
+  return a.length === 3 && a.every(Number.isFinite) ? V3(a) : null;
+};
+const [qPos, qTarget] = [vec3Param('pos'), vec3Param('target')];
+if (qPos && qTarget) {
+  camera.position.copy(qPos);
+  controls.target.copy(qTarget);
+  lastInteract = performance.now();
+}
+// Set a checkbox and let its change handler update the state (not .click(), which toggles).
+const setToggle = (id, on) => {
+  $(id).checked = on;
+  $(id).dispatchEvent(new Event('change'));
+};
+if (q.get('autopeel') === '0') setToggle('auto-peel', false);
 if (q.has('peel')) state.peel = state.eff = ui.peel.value = clamp(+q.get('peel') || 0, 0, N - 1);
-if (q.get('xray') === '1') $('xray').click();
+if (q.get('xray') === '1') setToggle('xray', true);
 if (['front', 'side'].includes(q.get('cut'))) document.querySelector(`#cut-mode [data-cut="${q.get('cut')}"]`).click();
 
 addEventListener('resize', resize);

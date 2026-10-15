@@ -3,6 +3,7 @@
 // Person's right side is -x, left side is +x.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { Field, ellipsoid, cone, lathe } from './sdf.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const v = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -38,6 +39,12 @@ const J = {
   knee: (s) => v(0.1 * s, 0.5, 0.01),
   ankle: (s) => v(0.1 * s, 0.085, -0.01),
 };
+
+// Centre of the right/left eyeball (multiply x by the side).
+const EYE = v(0.033, 1.675, 0.077);
+
+// Finger positions across the hand (z) and their lengths, index to little finger.
+const FINGERS = [[0.042, 0.1], [0.024, 0.11], [0.006, 0.105], [-0.011, 0.086]];
 
 function orient(obj, a, b) {
   const dir = new THREE.Vector3().subVectors(b, a);
@@ -169,32 +176,169 @@ function flowTexture() {
 
 // ---------------------------------------------------------------- skin
 
-function buildSkin(L) {
-  const prof = [
-    [0, 0.8], [0.07, 0.805], [0.13, 0.83], [0.165, 0.88], [0.172, 0.94], [0.16, 1.0],
-    [0.145, 1.06], [0.142, 1.12], [0.152, 1.2], [0.168, 1.28], [0.18, 1.35], [0.185, 1.41],
-    [0.165, 1.46], [0.11, 1.49], [0.055, 1.505], [0, 1.51],
-  ].map(([r, y]) => new THREE.Vector2(r, y));
-  L.mesh('skin', new THREE.LatheGeometry(prof, 64)).scale.z = 0.6;
+const TORSO = [
+  [0, 0.8], [0.07, 0.805], [0.13, 0.83], [0.165, 0.88], [0.172, 0.94], [0.16, 1.0],
+  [0.145, 1.06], [0.142, 1.12], [0.152, 1.2], [0.168, 1.28], [0.18, 1.35], [0.185, 1.41],
+  [0.178, 1.44], [0.14, 1.47], [0.085, 1.5], [0.055, 1.52], [0, 1.53],
+];
 
-  L.limb('skin', v(0, 1.45, 0), v(0, 1.6, 0.005), 0.054, 0.05);
-  L.ellipsoid('skin', v(0, 1.68, 0.005), v(0.088, 0.112, 0.1));
-  L.ellipsoid('skin', v(0, 1.605, 0.035), v(0.062, 0.05, 0.06)); // jaw and chin
-  const nose = L.mesh('skin', new THREE.ConeGeometry(0.014, 0.035, 16));
-  nose.position.set(0, 1.663, 0.1);
-  nose.rotation.x = 0.35;
+// The skin is one continuous surface sculpted from smoothly blended shapes.
+function sculptSkin() {
+  const field = new Field(v(-0.34, -0.01, -0.17), v(0.34, 1.81, 0.2), 0.004);
+  const E = (c, r, k = 0.03) => field.add(ellipsoid(c, r), k);
+  const C = (a, b, ra, rb, k = 0.03) => field.add(cone(a, b, ra, rb), k);
+  const lerp = (a, b, t) => a.clone().lerp(b, t);
+
+  // Torso
+  // A spline through the profile points, so the torso has no ridges at the corners.
+  const spline = new THREE.CatmullRomCurve3(TORSO.map(([r, y]) => v(r, y, 0)), false, 'centripetal');
+  field.add(lathe(spline.getPoints(80).map((p) => [Math.max(0, p.x), p.y]), 0.6));
+  E(v(0, 1.06, 0.015), v(0.13, 0.15, 0.078), 0.05); // abdomen
+  C(v(0, 1.44, -0.01), v(0, 1.6, 0), 0.054, 0.047, 0.035); // neck
   for (const s of SIDES) {
-    L.ellipsoid('skin', v(0.088 * s, 1.67, -0.005), v(0.012, 0.026, 0.018)); // ear
-    L.ellipsoid('skin', v(0.185 * s, 1.43, 0), v(0.06, 0.055, 0.058)); // shoulder
-    L.limb('skin', J.shoulder(s), J.elbow(s), 0.05, 0.039);
-    L.limb('skin', J.elbow(s), J.wrist(s), 0.039, 0.028);
-    L.ellipsoid('skin', v(0.284 * s, 0.815, 0.022), v(0.019, 0.07, 0.042)); // hand
-    L.limb('skin', v(0.274 * s, 0.875, 0.035), v(0.28 * s, 0.83, 0.058), 0.011, 0.009); // thumb
-    L.limb('skin', J.hip(s), J.knee(s), 0.088, 0.053);
-    L.limb('skin', J.knee(s), J.ankle(s), 0.053, 0.032);
-    L.ellipsoid('skin', v(0.103 * s, 0.035, 0.045), v(0.042, 0.035, 0.105)); // foot
-    L.ellipsoid('skin', v(0.07 * s, 0.88, -0.05), v(0.085, 0.085, 0.07)); // buttock
+    E(v(0.068 * s, 1.345, 0.06), v(0.075, 0.058, 0.045), 0.035); // chest
+    E(v(0.105 * s, 1.27, -0.02), v(0.07, 0.15, 0.08), 0.05); // ribs and lats
+    E(v(0.08 * s, 1.37, -0.075), v(0.06, 0.07, 0.035), 0.04); // shoulder blade
+    E(v(0.068 * s, 0.88, -0.055), v(0.085, 0.09, 0.072), 0.04); // buttock
+    C(v(0, 1.53, -0.025), v(0.17 * s, 1.45, -0.012), 0.032, 0.04, 0.05); // trapezius
+    E(v(0.188 * s, 1.425, 0), v(0.062, 0.062, 0.06), 0.04); // shoulder
   }
+
+  // Head and face
+  E(v(0, 1.685, -0.005), v(0.082, 0.1, 0.1), 0.02); // cranium
+  E(v(0, 1.62, 0.028), v(0.064, 0.075, 0.072), 0.03); // face
+  E(v(0, 1.572, 0.062), v(0.026, 0.022, 0.024), 0.02); // chin
+  E(v(0, 1.7, 0.078), v(0.058, 0.015, 0.02), 0.02); // brow ridge
+  E(v(0, 1.605, 0.075), v(0.03, 0.018, 0.018), 0.02); // mouth
+  C(v(0, 1.688, 0.088), v(0, 1.646, 0.104), 0.008, 0.011, 0.012); // nose bridge
+  E(v(0, 1.642, 0.103), v(0.013, 0.011, 0.012), 0.01); // nose tip
+  for (const s of SIDES) {
+    E(v(0.045 * s, 1.6, 0), v(0.02, 0.033, 0.038), 0.03); // jaw angle
+    E(v(0.042 * s, 1.652, 0.06), v(0.024, 0.02, 0.022), 0.02); // cheekbone
+    E(v(0.011 * s, 1.638, 0.097), v(0.007, 0.006, 0.007), 0.008); // nostril
+    E(v(0.081 * s, 1.665, -0.008), v(0.011, 0.03, 0.019), 0.008); // ear
+  }
+
+  // Limbs
+  for (const s of SIDES) {
+    const [sh, el, wr, hip, kn, an] = [J.shoulder(s), J.elbow(s), J.wrist(s), J.hip(s), J.knee(s), J.ankle(s)];
+    C(sh, el, 0.05, 0.038);
+    E(lerp(sh, el, 0.45).add(v(0, 0, 0.014)), v(0.032, 0.07, 0.032)); // biceps
+    E(lerp(sh, el, 0.4).add(v(0, 0, -0.016)), v(0.033, 0.08, 0.03)); // triceps
+    E(el, v(0.036, 0.03, 0.034), 0.02);
+    C(el, wr, 0.038, 0.026);
+    E(lerp(el, wr, 0.25).add(v(0, 0, 0.004)), v(0.04, 0.07, 0.035)); // forearm
+    C(wr, v(0.278 * s, 0.875, 0.018), 0.025, 0.021, 0.02); // wrist
+    E(v(0.281 * s, 0.86, 0.016), v(0.013, 0.034, 0.038), 0.012); // palm
+    for (const [z, len] of FINGERS) C(v(0.282 * s, 0.832, z), v(0.283 * s, 0.857 - len, z + 0.006), 0.0085, 0.0068, 0.004);
+    C(v(0.276 * s, 0.875, 0.04), v(0.285 * s, 0.835, 0.066), 0.012, 0.009, 0.01); // thumb
+
+    C(hip, kn, 0.092, 0.056, 0.04);
+    E(lerp(hip, kn, 0.42).add(v(0.008 * s, 0, 0.022)), v(0.062, 0.14, 0.055), 0.04); // quadriceps
+    E(lerp(hip, kn, 0.4).add(v(0, 0, -0.025)), v(0.06, 0.13, 0.05), 0.04); // hamstrings
+    E(lerp(hip, kn, 0.22).add(v(-0.035 * s, 0, 0)), v(0.045, 0.11, 0.05), 0.04); // inner thigh
+    E(kn.clone().add(v(0, 0, 0.012)), v(0.05, 0.045, 0.048), 0.03); // knee
+    C(kn, an, 0.055, 0.033);
+    E(v(0.1 * s, 0.37, -0.022), v(0.045, 0.09, 0.04), 0.04); // calf
+    E(an, v(0.034, 0.03, 0.036), 0.02); // ankle
+    E(v(0.103 * s, 0.033, 0.035), v(0.042, 0.033, 0.09), 0.03); // foot
+    E(v(0.1 * s, 0.035, -0.035), v(0.034, 0.035, 0.035), 0.03); // heel
+    for (let t = 0; t < 5; t++) {
+      const x = (0.083 + t * 0.0095) * s;
+      C(v(x, 0.022, 0.115 - t * 0.006), v(x, 0.016, 0.145 - t * 0.008), 0.009 - t * 0.0008, 0.008 - t * 0.0008, 0.006);
+    }
+  }
+
+  return field;
+}
+
+// Eye openings, carved after the inner layers are covered so the eyeballs show through.
+function carveEyes(field) {
+  for (const s of SIDES) field.add(ellipsoid(v(EYE.x * s, EYE.y + 0.001, EYE.z + 0.017), v(0.016, 0.008, 0.012)), 0.005, true);
+}
+
+// Bulge the skin over anything inside that would otherwise touch or break through it.
+function coverInnerLayers(field, layers) {
+  const p = new THREE.Vector3(), n = new THREE.Vector3();
+  for (const L of layers) {
+    L.group.updateMatrixWorld(true);
+    L.group.traverse((m) => {
+      if (!m.isMesh || m.userData.part === 'eyes') return;
+      const pos = m.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        p.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+        const s = field.at(p);
+        if (s < -0.0015) continue;
+        field.gradient(p.x, p.y, p.z, n);
+        field.add(cone(p.clone().addScaledVector(n, -(s + 0.006)), p.clone(), 0.003, 0.0015), 0.03);
+      }
+    });
+  }
+}
+
+// True when every point is at least 4 mm inside the skin; branches that fail are dropped.
+const inBody = (skin, ...pts) => pts.every((p) => skin.at(p) < -0.004);
+
+// Faces of a mesh where every vertex passes `keep`, pushed out along the normal.
+function surfacePatch(geo, keep, offset) {
+  const p = geo.attributes.position, n = geo.attributes.normal, idx = geo.index.array;
+  const remap = new Int32Array(p.count).fill(-1);
+  const pos = [], nrm = [], index = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    const tri = [idx[t], idx[t + 1], idx[t + 2]];
+    if (!tri.every((i) => keep(p.getX(i), p.getY(i), p.getZ(i)))) continue;
+    for (const i of tri) {
+      if (remap[i] < 0) {
+        remap[i] = pos.length / 3;
+        const o = offset(i);
+        pos.push(p.getX(i) + n.getX(i) * o, p.getY(i) + n.getY(i) * o, p.getZ(i) + n.getZ(i) * o);
+        nrm.push(n.getX(i), n.getY(i), n.getZ(i));
+      }
+      index.push(remap[i]);
+    }
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  out.setIndex(index);
+  return out;
+}
+
+function buildSkin(L, field) {
+  const geo = field.mesh();
+
+  // Skin tone: warmer on cheeks, elbows, knees and hands; darker in creases.
+  const ao = field.occlusion(geo);
+  const p = geo.attributes.position;
+  const col = new Float32Array(p.count * 3);
+  const tone = new THREE.Color('#e3ab8b'), warm = new THREE.Color('#d4826f'), c = new THREE.Color(), q = new THREE.Vector3();
+  const blush = SIDES.flatMap((s) => [
+    [v(0.045 * s, 1.645, 0.075), 0.028], [J.elbow(s).add(v(0, 0, -0.035)), 0.04],
+    [J.knee(s).add(v(0, 0, 0.055)), 0.045], [v(0.282 * s, 0.82, 0.02), 0.07],
+  ]);
+  for (let i = 0; i < p.count; i++) {
+    q.fromBufferAttribute(p, i);
+    const w = Math.max(...blush.map(([at, r]) => Math.exp(-q.distanceToSquared(at) / (r * r))));
+    c.copy(tone).lerp(warm, 0.55 * w).multiplyScalar(0.5 + 0.5 * Math.pow(ao[i], 0.8));
+    c.toArray(col, i * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  L.mesh('skin', geo);
+
+  // Short hair: the scalp part of the skin, lifted a few millimetres.
+  const onScalp = (x, y, z) => y > 1.63 + 0.105 * THREE.MathUtils.smoothstep(z, -0.06, 0.07) && !(Math.abs(x) > 0.07 && y < 1.71 && z > -0.04 && z < 0.03);
+  const R = rng(9);
+  L.mesh('hair', surfacePatch(geo, onScalp, () => 0.002 + R() * 0.0015));
+
+  // Eyebrows and lips follow the face surface.
+  const onFace = (pts, depth) => pts.map(([x, y]) => field.surfaceFromFront(x, y).add(v(0, 0, depth)));
+  for (const s of SIDES) {
+    const brow = onFace([[0.014, 1.692], [0.025, 1.696], [0.036, 1.696], [0.047, 1.692]].map(([x, y]) => [x * s, y]), 0.001);
+    L.mesh('hair', tubeGeo(brow, 0.0028, { radial: 6, rFn: (t) => 1 - 0.5 * t }), { mat: 'brows' });
+  }
+  const lip = (y, r) => tubeGeo(onFace([-0.022, -0.011, 0, 0.011, 0.022].map((x) => [x, y]), -0.003), r, { radial: 8, rFn: (t) => 0.45 + 0.55 * Math.sin(Math.PI * t) });
+  L.mesh('lips', lip(1.614, 0.0042));
+  L.mesh('lips', lip(1.606, 0.0046));
 }
 
 // ---------------------------------------------------------------- muscles
@@ -221,7 +365,7 @@ function buildMuscles(L) {
     L.ellipsoid('quadriceps', J.hip(s).lerp(J.knee(s), 0.45).add(v(0, 0, 0.012)), v(0.05, 0.1, 0.045));
     L.limb('calf', J.knee(s), J.ankle(s), 0.049, 0.028);
     L.ellipsoid('calf', v(0.1 * s, 0.37, -0.012), v(0.035, 0.08, 0.022));
-    L.ellipsoid('calf', v(0.103 * s, 0.035, 0.045), v(0.036, 0.03, 0.095));
+    L.ellipsoid('calf', v(0.103 * s, 0.035, 0.035), v(0.034, 0.028, 0.085));
   }
   for (let row = 0; row < 4; row++) {
     for (const s of SIDES) {
@@ -327,8 +471,7 @@ function buildSkeleton(L, ribCurves) {
     L.bone('radius-ulna', v(0.24 * s, 1.15, 0.0), v(0.272 * s, 0.905, 0.028), 0.0065, 1.6);
     L.bone('radius-ulna', v(0.232 * s, 1.155, -0.02), v(0.268 * s, 0.9, 0.01), 0.006, 1.6);
     L.ellipsoid('hand-bones', v(0.275 * s, 0.885, 0.02), v(0.012, 0.012, 0.022));
-    const fingers = [[0.036, 0.1], [0.024, 0.11], [0.012, 0.105], [0.002, 0.085]];
-    for (const [z, len] of fingers) {
+    for (const [z, len] of FINGERS) {
       L.tube('hand-bones', [v(0.277 * s, 0.875, z), v(0.283 * s, 0.875 - len * 0.55, z + 0.002), v(0.281 * s, 0.875 - len, z + 0.006)], 0.0035, { radial: 6 });
       L.sphere('hand-bones', v(0.282 * s, 0.875 - len * 0.45, z + 0.001), 0.0048);
     }
@@ -434,7 +577,7 @@ function buildOrgans(L, anim) {
   L.sphere('stomach', v(0.065, 1.15, 0.015), 0.03);
   L.tube('stomach', [v(0.04, 1.17, 0), v(0.07, 1.15, 0.02), v(0.085, 1.11, 0.035), v(0.07, 1.07, 0.045), v(0.035, 1.055, 0.045), v(0, 1.065, 0.04), v(-0.02, 1.075, 0.03)], 0.025,
     { rFn: (t) => 0.75 + 0.45 * Math.sin(Math.PI * Math.min(1, t * 1.3)) });
-  L.ellipsoid('spleen', v(0.112, 1.11, -0.03), v(0.02, 0.042, 0.025), { rot: [0, 0, 0.3] });
+  L.ellipsoid('spleen', v(0.1, 1.11, -0.02), v(0.02, 0.042, 0.025), { rot: [0, 0, 0.3] });
   L.tube('pancreas', [v(-0.025, 1.045, 0), v(0.02, 1.055, -0.005), v(0.06, 1.07, -0.012), v(0.095, 1.085, -0.02)], 0.011, { rFn: (t) => 1.2 - 0.6 * t });
   for (const s of SIDES) {
     const y = s < 0 ? 1.03 : 1.042;
@@ -465,7 +608,7 @@ function buildOrgans(L, anim) {
 
   // Eyes
   for (const s of SIDES) {
-    const c = v(0.033 * s, 1.675, 0.077);
+    const c = v(EYE.x * s, EYE.y, EYE.z);
     L.sphere('eyes', c, 0.0135);
     L.ellipsoid('eyes', c.clone().add(v(0, 0, 0.0115)), v(0.0072, 0.0072, 0.003), { mat: 'iris' });
     L.ellipsoid('eyes', c.clone().add(v(0, 0, 0.0135)), v(0.0032, 0.0032, 0.0012), { mat: 'pupil' });
@@ -481,7 +624,7 @@ const VESSEL_TYPE = {
   'vena-cava': VEIN, jugular: VEIN, 'arm-vein': VEIN, 'leg-vein': VEIN, venules: VEIN, 'pulmonary-artery': VEIN,
 };
 
-function buildVessels(L) {
+function buildVessels(L, skin) {
   const FLOW = 14;
   const A = (part, pts, r, opts = {}) => L.tube(part, pts, r, { flow: FLOW, radial: 10, ...opts });
   const taper = (k) => (t) => 1 - k * t;
@@ -498,11 +641,10 @@ function buildVessels(L) {
       const l = len * (0.6 + R() * 0.8);
       const mid = p.clone().addScaledVector(dir, l * 0.5).add(v((R() - 0.5) * 0.01, (R() - 0.5) * 0.01, (R() - 0.5) * 0.01));
       const end = p.clone().addScaledVector(dir, l);
+      const fork = R() > 0.5 ? mid.clone().addScaledVector(dir.clone().add(v(R() - 0.5, R() - 0.5, R() - 0.5)).normalize(), l * 0.5) : null;
+      if (!inBody(skin, mid, end)) continue;
       A(part, [p, mid, end], r, { radial: 6, rFn: taper(0.6) });
-      if (R() > 0.5) {
-        const d2 = dir.clone().add(v(R() - 0.5, R() - 0.5, R() - 0.5)).normalize();
-        A(part, [mid, mid.clone().addScaledVector(d2, l * 0.5)], r * 0.6, { radial: 5, rFn: taper(0.6) });
-      }
+      if (fork && inBody(skin, fork)) A(part, [mid, fork], r * 0.6, { radial: 5, rFn: taper(0.6) });
     }
   }
 
@@ -578,7 +720,7 @@ function brainGeometry(freq, amp, folia = false) {
   return g;
 }
 
-function buildNerves(L, ribCurves) {
+function buildNerves(L, ribCurves, skin) {
   const N = (part, pts, r, opts = {}) => L.tube(part, pts, r, { radial: 8, ...opts });
   const R = rng(5);
   const cortex = brainGeometry(17, 0.07);
@@ -604,7 +746,10 @@ function buildNerves(L, ribCurves) {
       const t = 0.15 + 0.8 * R();
       const p = curve.getPointAt(t);
       const dir = curve.getTangentAt(t).multiplyScalar(0.7).add(v(R() - 0.5, R() - 0.5, R() - 0.5)).normalize();
-      N(part, [p, p.clone().addScaledVector(dir, len * 0.5).add(v(0, (R() - 0.5) * 0.01, 0)), p.clone().addScaledVector(dir, len)], 0.0014, { radial: 5, rFn: (t) => 1 - 0.6 * t });
+      const mid = p.clone().addScaledVector(dir, len * 0.5).add(v(0, (R() - 0.5) * 0.01, 0));
+      const end = p.clone().addScaledVector(dir, len);
+      if (!inBody(skin, mid, end)) continue;
+      N(part, [p, mid, end], 0.0014, { radial: 5, rFn: (t) => 1 - 0.6 * t });
     }
   }
 
@@ -613,7 +758,7 @@ function buildNerves(L, ribCurves) {
       v(0.205 * s, 1.3, 0.012), v(0.228 * s, 1.17, 0.006), v(0.245 * s, 1.03, 0.014), v(0.265 * s, 0.92, 0.016)];
     N('arm-nerves', arm, 0.0032, { rFn: (t) => 1 - 0.4 * t });
     N('arm-nerves', [arm[3], v(0.208 * s, 1.3, -0.018), v(0.236 * s, 1.17, -0.024), v(0.262 * s, 1.03, -0.005), v(0.27 * s, 0.92, 0.0)], 0.0024, { rFn: (t) => 1 - 0.5 * t });
-    for (const [z, len] of [[0.036, 0.1], [0.024, 0.11], [0.012, 0.105], [0.002, 0.085], [0.05, 0.07]]) {
+    for (const [z, len] of [...FINGERS, [0.05, 0.07]]) {
       N('arm-nerves', [v(0.265 * s, 0.92, 0.016), v(0.276 * s, 0.875, (z + 0.016) / 2), v(0.284 * s, 0.875 - len * 0.6, z)], 0.0012, { radial: 5 });
     }
     twigs('arm-nerves', arm.slice(4), 6);
@@ -644,13 +789,17 @@ const ORGAN_COLORS = {
   heart: ['#b2202d', 0.3], coronary: ['#e8443f', 0.3], liver: ['#7e2d22', 0.35], gallbladder: ['#5c8a3a', 0.3],
   stomach: ['#d98c86', 0.4], spleen: ['#6e2b4d', 0.35], pancreas: ['#e7bf78', 0.5], kidneys: ['#8e3535', 0.35],
   adrenal: ['#e6b84a', 0.5], ureter: ['#e8d39a', 0.5], 'large-intestine': ['#c78470', 0.45], 'small-intestine': ['#eaa595', 0.4],
-  bladder: ['#d9b65e', 0.35], eyes: ['#f4f1ea', 0.15], iris: ['#3f7cb8', 0.2], pupil: ['#050505', 0.1],
+  bladder: ['#d9b65e', 0.35], eyes: ['#f4f1ea', 0.15], iris: ['#6a4b30', 0.2], pupil: ['#050505', 0.1],
 };
 
 function makeFactories(textures) {
   const base = { transparent: true, side: THREE.DoubleSide };
   return {
-    skin: () => new THREE.MeshPhysicalMaterial({ ...base, color: '#e2a885', roughness: 0.55, sheen: 0.6, sheenColor: '#ffcfb0', sheenRoughness: 0.5, clearcoat: 0.08 }),
+    skin: (key) => {
+      if (key === 'hair' || key === 'brows') return new THREE.MeshStandardMaterial({ ...base, color: '#2e1f16', roughness: 0.85 });
+      if (key === 'lips') return new THREE.MeshPhysicalMaterial({ ...base, color: '#b8695f', roughness: 0.4, clearcoat: 0.3 });
+      return new THREE.MeshPhysicalMaterial({ ...base, vertexColors: true, roughness: 0.5, sheen: 0.6, sheenColor: '#ffcfb0', sheenRoughness: 0.5, clearcoat: 0.08 });
+    },
     muscles: (key) => new THREE.MeshStandardMaterial({
       ...base, map: textures.muscle, bumpMap: textures.muscle, bumpScale: 1.4, roughness: 0.5,
       color: key === 'core-muscles' ? '#e8c4c0' : '#ffffff',
@@ -682,22 +831,23 @@ function makeFactories(textures) {
 function mergeLayer(L) {
   L.group.updateMatrixWorld(true);
   const buckets = new Map();
-  const statics = [];
   L.group.traverse((o) => {
-    if (o.isMesh && !o.userData.dynamic) statics.push(o);
-  });
-  for (const m of statics) {
-    const key = m.userData.part + '|' + m.userData.matKey;
+    if (!o.isMesh || o.userData.dynamic) return;
+    const key = o.userData.part + '|' + o.userData.matKey;
     if (!buckets.has(key)) buckets.set(key, []);
-    let g = m.geometry.clone().applyMatrix4(m.matrixWorld);
-    if (g.index) g = g.toNonIndexed();
-    for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
-    buckets.get(key).push(g);
-    m.parent.remove(m);
-  }
-  for (const [key, geos] of buckets) {
+    buckets.get(key).push(o);
+  });
+  for (const [key, meshes] of buckets) {
+    const geos = meshes.map((m) => {
+      m.parent.remove(m);
+      let g = m.geometry.clone().applyMatrix4(m.matrixWorld);
+      if (meshes.length === 1) return g; // nothing to merge with: keep it indexed (the skin is large)
+      if (g.index) g = g.toNonIndexed();
+      for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+      return g;
+    });
     const [part, matKey] = key.split('|');
-    const merged = mergeGeometries(geos);
+    const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos);
     merged.computeBoundingSphere();
     L.mesh(part, merged, { mat: matKey });
   }
@@ -713,12 +863,15 @@ export function buildBody() {
   const root = new THREE.Group();
   const layers = LAYERS.map((meta) => makeLayer(meta, factories[meta.id]));
   const [skin, muscles, skeleton, organs, vessels, nerves] = layers;
-  buildSkin(skin);
   buildMuscles(muscles);
   buildSkeleton(skeleton, ribCurves);
   buildOrgans(organs, anim);
-  buildVessels(vessels);
-  buildNerves(nerves, ribCurves);
+  const field = sculptSkin();
+  buildVessels(vessels, field);
+  buildNerves(nerves, ribCurves, field);
+  coverInnerLayers(field, [muscles, skeleton, organs, vessels, nerves]);
+  carveEyes(field);
+  buildSkin(skin, field);
   for (const L of layers) {
     mergeLayer(L);
     root.add(L.group);
@@ -730,6 +883,8 @@ export function buildBody() {
 
 export const INFO = {
   skin: ['Skin', 'The body\'s largest organ: a waterproof barrier that controls temperature, senses touch, heat and pain, and makes vitamin D.', 'An adult\'s skin covers about 1.8 m² and you shed tens of thousands of skin cells every minute.'],
+  hair: ['Hair', 'Hair keeps the head warm and shields it from the sun; eyebrows keep sweat out of the eyes.', 'A scalp has about 100,000 hairs, each growing roughly 1 cm a month.'],
+  lips: ['Lips', 'Soft, flexible edges of the mouth used for eating, speaking and expression.', 'Lips look red because their skin is very thin, letting blood vessels show through.'],
   'core-muscles': ['Core & back muscles', 'Obliques, latissimus dorsi and the deep back muscles wrap the torso, keeping you upright and twisting the trunk.', 'Your core muscles fire just before you move an arm or leg, to brace the spine.'],
   pectoralis: ['Pectoralis major', 'The large chest muscle that pulls the arm forward and across the body, as in a push-up or a hug.', 'It has two heads, clavicular and sternal, which can be trained separately.'],
   abdominals: ['Rectus abdominis', 'The "six-pack" muscle that flexes the spine and supports the organs of the abdomen.', 'The "packs" come from tendon bands (tendinous intersections) crossing the muscle.'],

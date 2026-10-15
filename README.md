@@ -13,6 +13,10 @@ A 3D human body in the browser that you can rotate, zoom and peel layer by layer
 - Deep links: `?view=head&peel=2`, `?view=chest&cut=front`, `?xray=1`
 
 Everything is built procedurally from shapes and curves with [Three.js](https://threejs.org/), with no model files and no backend.
+The skin is sculpted at load time as one smooth surface (signed-distance field + surface nets, `sdf.js`) and automatically
+bulges over anything inside that would otherwise poke through it.
+
+Controls: drag to rotate, scroll to zoom, right-drag to pan, double-click to focus a spot, R to reset the view.
 Stylized for learning, not anatomically exact.
 
 Built for Lab 1 of Agentic Programming (HUJI 67723) by talking to Claude Code.
