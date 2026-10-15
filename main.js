@@ -1,16 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { computeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
-import { loadBody, partOfHit, tintPart, partBox } from './anatomy.js';
-import { infoFor } from './info.js';
-
-THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
-THREE.Mesh.prototype.raycast = acceleratedRaycast;
+import { buildBody, INFO } from './anatomy.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = THREE.MathUtils.clamp;
 const V3 = (a) => new THREE.Vector3(...a);
+const WHITE = new THREE.Color('#ffffff');
 const SHORT = ['Skin', 'Muscle', 'Bone', 'Organs', 'Vessels', 'Nerves'];
 const XRAY = [0.22, 0.3, 0.55, 0.7, 0.95, 0.95];
 const PANEL_SHIFT = 170;
@@ -41,21 +37,20 @@ rim.position.set(-2, 2.2, -2.5);
 scene.add(rim);
 
 const VIEWS = {
-  full: { target: [0, 0.88, 0], pos: [0, 1.05, 3.5] },
-  head: { target: [0, 1.54, 0], pos: [0.36, 1.62, 0.66] },
-  chest: { target: [0, 1.24, 0.02], pos: [0.36, 1.36, 0.92] },
-  abdomen: { target: [0, 1.0, 0.03], pos: [-0.32, 1.08, 0.92] },
-  arm: { target: [0.26, 0.76, 0.03], pos: [0.92, 0.9, 0.88] },
-  legs: { target: [0.075, 0.42, 0], pos: [0.66, 0.58, 0.85] },
+  full: { target: [0, 0.95, 0], pos: [0, 1.15, 3.7] },
+  head: { target: [0, 1.67, 0.01], pos: [0.36, 1.75, 0.72] },
+  chest: { target: [0, 1.28, 0.02], pos: [0.36, 1.4, 0.94] },
+  abdomen: { target: [0, 1.0, 0.02], pos: [-0.32, 1.1, 0.92] },
+  arm: { target: [0.27, 0.86, 0.02], pos: [0.95, 1.0, 0.85] },
+  legs: { target: [0.1, 0.5, 0], pos: [0.7, 0.66, 0.85] },
 };
 camera.position.copy(V3(VIEWS.full.pos)).add(new THREE.Vector3(1.2, 0.2, 0.6));
 
 const controls = new OrbitControls(camera, canvas);
 controls.target.copy(V3(VIEWS.full.target));
 controls.enableDamping = true;
-controls.dampingFactor = 0.12;
-controls.zoomSpeed = 2.6;
-controls.rotateSpeed = 0.9;
+controls.dampingFactor = 0.08;
+controls.zoomSpeed = 4.5; // ~20% closer per scroll notch (default is ~5%)
 controls.minDistance = 0.16;
 controls.maxDistance = 6;
 controls.zoomToCursor = true;
@@ -91,13 +86,11 @@ for (const [r, o] of [[0.55, 0.45], [0.72, 0.2]]) {
 
 // ---------------------------------------------------------------- body
 
-const loadingText = $('loading-text');
-const { root, layers, anim } = await loadBody('models', (p) => {
-  loadingText.textContent = `Loading anatomy… ${Math.round(p * 100)}%`;
-});
+const { root, layers, anim } = buildBody();
 scene.add(root);
 const N = layers.length;
 const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 100);
+const partMeshes = new Map();
 
 layers.forEach((L, i) => {
   L.index = i;
@@ -105,7 +98,13 @@ layers.forEach((L, i) => {
   L.base = 1;
   L.op = 1;
   L.key = '';
-  for (const m of L.materials) m.clippingPlanes = [clipPlane];
+  L.materials = [...L.mats.values()];
+  for (const m of L.materials) {
+    m.clippingPlanes = [clipPlane];
+    m.userData.color = m.color.clone();
+    m.userData.emissive = m.emissive.clone();
+    m.userData.ei = m.emissiveIntensity;
+  }
   // Depth pre-pass: a translucent layer only shows its front-most surface,
   // so overlapping shapes inside one layer don't stack into dark blotches.
   const pre = new THREE.MeshBasicMaterial({ colorWrite: false, transparent: true, side: THREE.DoubleSide, clippingPlanes: [clipPlane] });
@@ -119,7 +118,9 @@ layers.forEach((L, i) => {
     p.renderOrder = order;
     p.raycast = () => {};
     m.add(p);
-    m.geometry.computeBoundsTree();
+    const part = m.userData.part;
+    if (!partMeshes.has(part)) partMeshes.set(part, []);
+    partMeshes.get(part).push(m);
   }
 });
 
@@ -250,7 +251,7 @@ let tween = null;
 let lastInteract = 0;
 const ease = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
 
-function tweenTo(pos, target, dur = 750) {
+function tweenTo(pos, target, dur = 1200) {
   tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos, t1: target, start: performance.now(), dur };
   lastInteract = performance.now();
 }
@@ -274,30 +275,39 @@ function pick(x, y) {
   raycaster.setFromCamera(ndc, camera);
   for (const h of raycaster.intersectObject(root, true)) {
     const L = layers[h.object.userData.layerIndex];
-    if (!L || L.op < 0.3) continue;
+    if (!L || !h.object.userData.part || L.op < 0.3) continue;
     if (clipPlane.distanceToPoint(h.point) < 0) continue;
-    const part = partOfHit(h);
-    if (!part) continue;
-    return { part, layer: L, point: h.point.clone() };
+    return { part: h.object.userData.part, layer: L, point: h.point.clone() };
   }
   return null;
 }
 
-const samePart = (a, b) => a && b && a.part.key === b.part.key && a.part.mesh === b.part.mesh;
-const describe = (hit) => infoFor(hit.part.key, hit.part.label, hit.layer.id);
+function glow(part, level) {
+  for (const mesh of partMeshes.get(part) ?? []) {
+    const m = mesh.material;
+    m.color.copy(m.userData.color);
+    m.emissive.copy(m.userData.emissive);
+    m.emissiveIntensity = m.userData.ei;
+    if (level) {
+      m.color.lerp(WHITE, level === 2 ? 0.22 : 0.32);
+      m.emissive.set(level === 2 ? '#1d9fc0' : '#3a78e0');
+      m.emissiveIntensity = level === 2 ? 0.5 : 0.42;
+    }
+  }
+}
 
 function refreshGlow(prev = []) {
-  for (const p of prev) if (p) tintPart(p.part, 0);
-  if (selected) tintPart(selected.part, 2);
-  if (hovered && !samePart(hovered, selected)) tintPart(hovered.part, 1);
+  for (const p of prev) if (p) glow(p, 0);
+  if (selected) glow(selected.part, 2);
+  if (hovered && hovered.part !== selected?.part) glow(hovered.part, 1);
 }
 
 function setHover(hit, x, y) {
-  const prev = hovered;
+  const prev = hovered?.part;
   hovered = hit;
-  if (!samePart(prev, hit)) refreshGlow([prev]);
+  if (prev !== hit?.part) refreshGlow([prev]);
   if (hit) {
-    const [name] = describe(hit);
+    const [name] = INFO[hit.part] ?? [hit.part];
     ui.tooltip.innerHTML = `${name}<i>${hit.layer.name}</i>`;
     ui.tooltip.style.left = x + 'px';
     ui.tooltip.style.top = y + 'px';
@@ -310,19 +320,17 @@ function setHover(hit, x, y) {
 }
 
 function select(hit) {
-  const prev = selected;
+  const prev = selected?.part;
   selected = hit;
   refreshGlow([prev]);
   if (!hit) {
     ui.info.hidden = true;
     return;
   }
-  const [name, desc, fact, group] = describe(hit);
+  const [name, desc, fact] = INFO[hit.part] ?? [hit.part, '', ''];
   $('info-name').textContent = name;
   $('info-desc').textContent = desc;
   $('info-fact').textContent = fact;
-  $('info-fact').parentElement.hidden = !fact;
-  $('info-group').textContent = group && group !== name ? group : '';
   const chip = $('info-layer');
   chip.textContent = hit.layer.name;
   chip.style.setProperty('--chip', hit.layer.color);
@@ -330,7 +338,8 @@ function select(hit) {
 }
 
 function focusOn(hit) {
-  const box = partBox(hit.part);
+  const box = new THREE.Box3();
+  for (const m of partMeshes.get(hit.part)) box.expandByObject(m);
   const size = box.getSize(new THREE.Vector3()).length();
   let dist = clamp(Math.min(size, 0.5) * 2.2, 0.32, 1.6);
   // Stay far enough that zoom-peeling doesn't strip away the layer we're looking at.
@@ -426,11 +435,11 @@ function frame() {
     controls.target.lerpVectors(tween.t0, tween.t1, e);
     if (k === 1) tween = null;
   }
-  controls.autoRotate = state.spin && !tween && now - lastInteract > 8000;
+  controls.autoRotate = state.spin && !tween && now - lastInteract > 7000;
   controls.update();
 
   if (peelAnim) {
-    const k = Math.min(1, (now - peelAnim.start) / 450);
+    const k = Math.min(1, (now - peelAnim.start) / 700);
     state.peel = THREE.MathUtils.lerp(peelAnim.from, peelAnim.to, ease(k));
     ui.peel.value = state.peel;
     if (k === 1) peelAnim = null;
@@ -440,7 +449,7 @@ function frame() {
   const dist = camera.position.distanceTo(controls.target);
   const zoomPeel = state.autoPeel ? clamp((2.4 - dist) / 1.8, 0, 1) * 3 : 0;
   const target = Math.max(state.peel, zoomPeel);
-  state.eff += (target - state.eff) * Math.min(1, dt * 14);
+  state.eff += (target - state.eff) * Math.min(1, dt * 10);
   if (Math.abs(target - state.eff) < 0.001) state.eff = target;
   applyLayers(state.eff);
   updateDepthUI(state.eff);
@@ -450,10 +459,13 @@ function frame() {
   const period = 60 / 72;
   const p = (sim % period) / period;
   const beat = Math.exp(-(((p - 0.08) / 0.05) ** 2)) + 0.55 * Math.exp(-(((p - 0.3) / 0.05) ** 2));
-  anim.heart?.scale.setScalar(1 + 0.045 * beat);
+  anim.heart.scale.setScalar(1 + 0.08 * beat);
   ui.heart.style.transform = `scale(${1 + 0.35 * beat})`;
   const br = Math.sin((sim * Math.PI * 2) / 4.5);
-  anim.lungs?.scale.set(1 + 0.025 * br, 1 + 0.035 * br, 1 + 0.025 * br);
+  for (const lung of anim.lungs) {
+    const b = lung.userData.baseScale;
+    lung.scale.set(b.x * (1 + 0.035 * br), b.y * (1 + 0.05 * br), b.z * (1 + 0.035 * br));
+  }
   if (state.animate) {
     const speed = dt * (0.35 + 1.4 * beat);
     anim.textures.flowA.offset.x -= speed;
@@ -491,7 +503,6 @@ if (VIEWS[q.get('view')]) {
 }
 if (q.has('peel')) state.peel = state.eff = ui.peel.value = clamp(+q.get('peel') || 0, 0, N - 1);
 if (q.get('xray') === '1') $('xray').click();
-if (q.get('autopeel') === '0') $('auto-peel').click();
 if (['front', 'side'].includes(q.get('cut'))) document.querySelector(`#cut-mode [data-cut="${q.get('cut')}"]`).click();
 
 addEventListener('resize', resize);
