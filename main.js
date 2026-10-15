@@ -151,7 +151,7 @@ const state = { peel: 0, eff: 0, autoPeel: true, xray: false, animate: true, spi
 const ui = {
   peel: $('peel'), depthName: $('depth-name'), ticks: $('depth-ticks'), list: $('layer-list'),
   fill: $('depth-fill'), dot: $('depth-dot'), labels: $('depth-labels'), cut: $('cut'),
-  tooltip: $('tooltip'), info: $('info'), hint: $('hint'), heart: document.querySelector('#vitals .heart'),
+  tooltip: $('tooltip'), info: $('info'), heart: document.querySelector('#vitals .heart'),
 };
 
 const EYE_ON = '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -270,7 +270,6 @@ function tweenTo(pos, target, dur = 800) {
 controls.addEventListener('start', () => {
   tween = null;
   lastInteract = performance.now();
-  ui.hint.classList.add('fade');
 });
 
 // ---------------------------------------------------------------- picking, hover, info card
