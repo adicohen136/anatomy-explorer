@@ -204,7 +204,10 @@ input[type=range]:disabled { opacity: 0.35; }
   color: var(--muted);
 }
 .chip::before { content: ''; width: 9px; height: 9px; border-radius: 3px; background: var(--chip, #fff); }
-#info h2 { font: 700 22px/1.15 'Space Grotesk', sans-serif; margin: 6px 0 8px; }
+#info h2 { font: 700 22px/1.15 'Space Grotesk', sans-serif; margin: 6px 0 2px; }
+#info-group { color: var(--accent); font-size: 12.5px; font-weight: 500; margin-bottom: 8px; min-height: 4px; }
+#credit { position: fixed; right: 16px; bottom: 10px; font-size: 10.5px; color: rgba(142, 162, 189, 0.7); z-index: 2; }
+#credit a { color: inherit; }
 #info p { margin: 0; color: #c9d6e8; }
 .fact { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: rgba(90, 209, 230, 0.08); border: 1px solid rgba(90, 209, 230, 0.2); }
 .fact span { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
@@ -235,6 +238,6 @@ input[type=range]:disabled { opacity: 0.35; }
   #depth-meter { right: 12px; top: 40%; height: 220px; }
   #depth-labels { display: none; }
   #info { left: 16px; right: 16px; width: auto; top: 64px; }
-  #hint { display: none; }
+  #hint, #credit { display: none; }
   #vitals { right: 16px; top: 16px; }
 }

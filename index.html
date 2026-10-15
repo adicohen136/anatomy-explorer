@@ -13,7 +13,8 @@
     {
       "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+        "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.6/build/index.module.js"
       }
     }
   </script>
@@ -90,6 +91,7 @@
     <button id="info-close" aria-label="Close">×</button>
     <div id="info-layer" class="chip"></div>
     <h2 id="info-name"></h2>
+    <div id="info-group"></div>
     <p id="info-desc"></p>
     <div class="fact"><span>Did you know?</span><p id="info-fact"></p></div>
     <div class="info-actions">
@@ -100,7 +102,8 @@
 
   <div id="tooltip"></div>
   <div id="hint">Drag to rotate · Scroll or pinch to zoom · Right-drag to pan · Click any part</div>
-  <div id="loading"><div class="spinner"></div>Growing a human…</div>
+  <footer id="credit">3D anatomy: <a href="https://lifesciencedb.jp/bp3d/" target="_blank" rel="noopener">BodyParts3D</a> © DBCLS, <a href="https://creativecommons.org/licenses/by-sa/2.1/jp/deed.en" target="_blank" rel="noopener">CC BY-SA 2.1 JP</a></footer>
+  <div id="loading"><div class="spinner"></div><span id="loading-text">Loading anatomy…</span></div>
 
   <script type="module" src="main.js"></script>
 </body>
